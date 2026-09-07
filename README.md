@@ -1,5 +1,7 @@
 # public-records-harvest
 
+[![CI](https://github.com/kyletristentran/public-records-harvest/actions/workflows/ci.yml/badge.svg)](https://github.com/kyletristentran/public-records-harvest/actions/workflows/ci.yml)
+
 One fetch path for public-records scrapers — on-disk cache, per-host rate limiting,
 retry with backoff, and a provenance ledger, under a swappable transport. Plus an
 ArcGIS REST client that turns the format's silent failure modes into exceptions.

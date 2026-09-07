@@ -4,3 +4,4 @@ __pycache__/
 .harvest/
 data/
 *.parquet
+*.egg-info/
