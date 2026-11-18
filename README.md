@@ -1,8 +1,6 @@
 # public-records-harvest
 
-One fetch path for public-records scrapers — on-disk cache, per-host rate limiting,
-retry with backoff, and a provenance ledger, under a swappable transport. Plus an
-ArcGIS REST client that turns the format's silent failure modes into exceptions.
+A shared fetch layer for public-records scrapers. It provides an on-disk cache, per-host rate limiting, retry with backoff and a provenance ledger, all behind a transport that can be swapped out. It also includes an ArcGIS REST client that raises exceptions in the cases where ArcGIS normally fails without reporting an error.
 
 ```python
 from harvest import build, registry, arcgis
@@ -15,38 +13,24 @@ for chunk in arcgis.fetch_all(f, LAYER, where="USE_CODE LIKE '3%'"):
     ...                                        # clamped to the server's maxRecordCount
 ```
 
-## Why
+## Problems it addresses
 
-Scrapers that grow organically tend to share four defects. This package exists to
-make each one impossible rather than documented:
+The package addresses four defects that are common in scrapers built up over time.
 
-**A failed fetch is not an empty result.** The client this replaced caught every
-exception and returned `[]`, so a timeout and "nothing matched" were the same value.
-Rows silently landed in the unresolved bucket and the run looked clean. Everything
-here raises; callers opt into a default explicitly.
-
-**Truncation is loud.** ArcGIS caps results at `maxRecordCount` and tells you only
-via `exceededTransferLimit`, which is easy to never read. An over-long `objectIds=`
-list truncates the same way. Both raise `TruncatedResponse`.
-
-**An HTTP 200 can be an error.** ArcGIS returns failures in the body with a 200
-status, so `raise_for_status()` alone lets them through.
-
-**Rate limits belong to the host, not the thread.** A `time.sleep()` inside each
-worker means N workers hit the host N times faster than intended. Here it's one
-token bucket per host, shared across threads.
+- **Failed fetches returned as empty results.** The client this package replaced caught every exception and returned `[]`, so a timeout and a query with no matches produced the same value. Rows ended up in the unresolved bucket and the run appeared to succeed. Every function here raises on failure, and a caller that wants a default has to ask for one.
+- **Truncated results.** ArcGIS caps a response at `maxRecordCount` and reports the cap only through `exceededTransferLimit`, which is easy to overlook. An `objectIds=` list that is too long is cut off in the same way. Both cases raise `TruncatedResponse`.
+- **Errors returned with HTTP 200.** ArcGIS places some failures in the response body under a 200 status, so `raise_for_status()` does not catch them. The client inspects the body.
+- **Rate limits applied per thread.** When each worker calls `time.sleep()`, N workers reach the host N times faster than intended. This package keeps one token bucket per host and shares it across threads.
 
 ## Provenance and replay
 
-Every response is recorded to `ledger.jsonl` with a timestamp, body hash and byte
-count, and cached by request hash. That makes a whole run replayable with no network:
+Every response is cached by request hash and recorded in `ledger.jsonl` with a timestamp, a body hash and a byte count. A complete run can therefore be replayed without network access:
 
 ```python
 f = build(".harvest", user_agent="…", offline=True)   # a cache miss raises
 ```
 
-Which is also how the derived data stays auditable — any value traces back to the
-request that produced it without re-fetching.
+The ledger also keeps derived data auditable, because any value can be traced to the request that produced it without fetching again.
 
 ## Layout
 
@@ -58,11 +42,7 @@ harvest/registry.py   per-host politeness, declared once
 adapters/             signature-compatible shim for migrating an existing client
 ```
 
-`fetch_all` uses OID windowing rather than `resultOffset` paging: the server re-scans
-from row 0 on every offset request, so late pages of a multi-million-feature layer
-cost far more than early ones, and some services silently cap the maximum offset.
-Asking once for the ObjectID list and requesting explicit windows makes every request
-O(chunk) and makes a crashed run resumable.
+`fetch_all` pages by ObjectID window instead of `resultOffset`. With offset paging the server scans from row 0 on every request, so the later pages of a layer with several million features cost much more than the early ones, and some services cap the maximum offset without reporting it. `fetch_all` requests the ObjectID list once and then asks for explicit windows. Each request then costs O(chunk), and a run that crashes can resume where it stopped.
 
 ## Tests
 
@@ -70,14 +50,12 @@ O(chunk) and makes a crashed run resumable.
 uv sync --extra dev && uv run pytest -q      # 20 tests, no network, no fixtures
 ```
 
-The entire suite runs against a scripted fake transport, including the rate limiter
-(virtual clock) and every ArcGIS failure mode.
+The suite runs against a scripted fake transport. It covers the rate limiter, using a virtual clock, and every ArcGIS failure mode listed above.
 
 ## Scope
 
-Public records only — this is built for open government endpoints (SEC EDGAR, Census,
-county assessor GIS, regional planning layers). It has no auth support by design.
-Check a site's `robots.txt` and terms before pointing it anywhere new, and set a
-User-Agent with a real contact address: some hosts require one.
+The package is intended for open government endpoints such as SEC EDGAR, the Census, county assessor GIS and regional planning layers. It does not support authentication. Check a site's `robots.txt` and terms of use before adding a new host, and set a User-Agent that includes a real contact address, because some hosts require one.
 
-MIT licensed.
+## License
+
+MIT
